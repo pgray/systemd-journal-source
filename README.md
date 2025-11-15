@@ -10,6 +10,7 @@ fluvio systemd journal source
 - [fluvio docs](https://www.fluvio.io/docs/latest/cloud/how-to/use-connectors/)
 
 # dev setup
+
 ```
 # install fluvio
 curl -fsS https://hub.infinyon.cloud/install/install.sh | bash
@@ -22,4 +23,7 @@ fluvio consume $topic &
 
 # in another terminal: start the source from root of repo
 cargo run -- --config sample-config.yaml
+# or
+cdk test --target x86_64-unknown-linux-gnu --config sample-config.yaml
+# NOTE: ^ target is required because, at least on my machine, systemd is dynamically linked
 ```

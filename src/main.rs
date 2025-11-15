@@ -100,6 +100,14 @@ impl Lookup {
             match self.serialization_format {
                 SerializationFormat::ColonDelimited => {
                     let mut msg = format!("{}:", timestamp);
+                    // TODO support remapping/renaming tags
+                    // e.g. _HOSTNAME -> hostname
+                    // _SYSTEMD_UNIT -> unit
+                    // ideas:
+                    // - lowercase
+                    // - remove prefixed underscore
+                    // - trim unit types and move to unit_type field
+                    //   - UNIT=tailscaled.service -> unit=tailscaled type=service
                     for tag in &self.tags {
                         if entry.contains_key(&tag.to_string()) {
                             msg += &format!("{}:", entry[&tag.to_string()])

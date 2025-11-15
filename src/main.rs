@@ -1,5 +1,6 @@
 mod config;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use std::process;
 
@@ -8,6 +9,7 @@ use config::CustomConfig;
 use systemd::{Journal, journal};
 
 use fluvio::{RecordKey, TopicProducerPool};
+use fluvio_connector_common::tracing::debug;
 use fluvio_connector_common::{Result, connector};
 
 // list of unit types to match if none specified on a given unit
@@ -93,11 +95,11 @@ impl Lookup {
             false => self.units.contains_key(unit),
         }
     }
-    fn process(&self, entry: &BTreeMap<String, String>) -> Option<Vec<u8>> {
+    fn process(&self, timestamp: u64, entry: &BTreeMap<String, String>) -> Option<Vec<u8>> {
         if entry.contains_key("UNIT") && self.contains(&entry["UNIT"]) {
             match self.serialization_format {
                 SerializationFormat::ColonDelimited => {
-                    let mut msg = "".to_string();
+                    let mut msg = format!("{}:", timestamp);
                     for tag in &self.tags {
                         if entry.contains_key(&tag.to_string()) {
                             msg += &format!("{}:", entry[&tag.to_string()])
@@ -106,13 +108,16 @@ impl Lookup {
                     return Some(msg.into_bytes());
                 }
                 SerializationFormat::Json => {
-                    let mut msg = HashMap::new();
+                    let mut msg = serde_json::Map::new();
+                    // TODO: make timestamp field name configurable for json?
+                    msg.insert("ts".to_string(), json!(timestamp));
                     for tag in &self.tags {
                         if entry.contains_key(&tag.to_string()) {
                             msg.insert(
                                 tag.to_string(),
                                 // TODO: handle more types than just strings
-                                entry[&tag.to_string()].clone(),
+                                // e.g. PRIORITY is an int
+                                json!(entry[&tag.to_string()].clone()),
                             );
                         }
                     }
@@ -143,8 +148,9 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
         config.tags,
     );
 
-    // do work
+    let debug = config.debug.is_some() && config.debug.unwrap();
     let mut counter: u64 = 0;
+    let mut timestamp: u64 = 0;
     // TODO: implement a way to track the last processed entry
     // config.reprocess bool to indicate whether we should resend
     // entries on restart... or some other better name
@@ -155,19 +161,36 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
                 Err(_) => break,
             },
             Ok(Some(ent)) => {
+                // TODO: make timestamp field configurable to some format e.g. ISO8601?
+                match journal.timestamp_usec() {
+                    Ok(usec) => {
+                        timestamp = usec;
+                    }
+                    Err(e) => {
+                        eprintln!("Error getting timestamp: {}", e);
+                        // HACK: increment usec timestamp if failed call to journal
+                        timestamp += 1;
+                    }
+                };
                 // TODO: real logger would be nice
-                if config.debug {
+                if debug {
                     for i in ent.keys() {
-                        println!("{}: {}", i, ent[i])
+                        println!("{}:{}: {}", timestamp, i, ent[i])
                     }
                 }
-                match lookup.process(&ent) {
+                match lookup.process(timestamp, &ent) {
                     None => (),
                     Some(buf) => {
                         producer.send(RecordKey::NULL, buf).await.unwrap();
                         counter += 1;
                         if counter.is_multiple_of(config.flush_batch_size) {
-                            producer.flush().await.unwrap();
+                            match producer.flush().await {
+                                Ok(_) => {
+                                    // TODO: write timestamp to some file to avoid reprocessing
+                                    debug!("Flushed producer");
+                                }
+                                Err(e) => eprintln!("Error flushing producer: {}", e),
+                            }
                         }
                     }
                 };

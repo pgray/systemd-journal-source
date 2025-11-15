@@ -1,0 +1,17 @@
+name: TODO
+on: [push, pull_request]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+      - name: run tdg-github-action
+        uses: ribtoks/tdg-github-action@master
+        with:
+          TOKEN: ${{ secrets.issue_token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}

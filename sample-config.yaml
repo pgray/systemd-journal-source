@@ -13,5 +13,6 @@ custom:
   tags: ["UNIT", "_HOSTNAME", "MESSAGE", "PRIORITY"]
   units: ["tailscaled"]
   flush_batch_size: 10
-  # default_unit_types: [".service", ".timer"]
+  # unit_types: [".service", ".timer"]
+  # serialization_format: "json" # or "colon"
   debug: false

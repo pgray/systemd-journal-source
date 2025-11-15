@@ -1,5 +1,6 @@
 mod config;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 use std::process;
 
 use config::CustomConfig;
@@ -12,19 +13,51 @@ use fluvio_connector_common::{Result, connector};
 // list of unit types to match if none specified on a given unit
 // TODO: more patterns by default?
 static UNIT_TYPES: &[&str] = &[".service", ".timer"];
+
+// SerializationFormat represents the format in which journal entries are serialized into fluvio.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "serialization_format")]
+enum SerializationFormat {
+    Json,
+    ColonDelimited,
+}
+
 // Lookup allows us to filter units based on their names.
 // if Lookup is empty, all units are allowed.
 struct Lookup {
     units: HashMap<String, bool>,
     empty: bool,
+    serialization_format: SerializationFormat,
+    tags: Vec<String>,
 }
 impl Lookup {
-    fn new(units: Vec<String>, suffixes: Option<Vec<String>>) -> Self {
+    fn new(
+        units: Vec<String>,
+        suffixes: Option<Vec<String>>,
+        serialization_format: Option<String>,
+        tags: Vec<String>,
+    ) -> Self {
         let mut map = HashMap::new();
+        let serialization_format = match serialization_format {
+            Some(format) => match format.as_str() {
+                "json" => SerializationFormat::Json,
+                "colon" => SerializationFormat::ColonDelimited,
+                _ => {
+                    println!(
+                        "Invalid serialization format specified: {}. Defaulting to JSON.",
+                        format
+                    );
+                    SerializationFormat::Json
+                }
+            },
+            None => SerializationFormat::Json,
+        };
         if units.is_empty() {
             return Self {
                 units: map,
                 empty: true,
+                serialization_format,
+                tags,
             };
         }
         let suffixes = match suffixes {
@@ -50,6 +83,8 @@ impl Lookup {
         Self {
             units: map,
             empty: false,
+            serialization_format,
+            tags,
         }
     }
     fn contains(&self, unit: &str) -> bool {
@@ -57,6 +92,35 @@ impl Lookup {
             true => true,
             false => self.units.contains_key(unit),
         }
+    }
+    fn process(&self, entry: &BTreeMap<String, String>) -> Option<Vec<u8>> {
+        if entry.contains_key("UNIT") && self.contains(&entry["UNIT"]) {
+            match self.serialization_format {
+                SerializationFormat::ColonDelimited => {
+                    let mut msg = "".to_string();
+                    for tag in &self.tags {
+                        if entry.contains_key(&tag.to_string()) {
+                            msg += &format!("{}:", entry[&tag.to_string()])
+                        }
+                    }
+                    return Some(msg.into_bytes());
+                }
+                SerializationFormat::Json => {
+                    let mut msg = HashMap::new();
+                    for tag in &self.tags {
+                        if entry.contains_key(&tag.to_string()) {
+                            msg.insert(
+                                tag.to_string(),
+                                // TODO: handle more types than just strings
+                                entry[&tag.to_string()].clone(),
+                            );
+                        }
+                    }
+                    return Some(serde_json::to_vec(&msg).unwrap());
+                }
+            }
+        }
+        None
     }
 }
 
@@ -72,7 +136,12 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
         .unwrap();
 
     // setup lookup table for units
-    let lookup = Lookup::new(config.units, config.default_unit_types);
+    let lookup = Lookup::new(
+        config.units,
+        config.unit_types,
+        config.serialization_format,
+        config.tags,
+    );
 
     // do work
     let mut counter: u64 = 0;
@@ -80,7 +149,6 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
     // config.reprocess bool to indicate whether we should resend
     // entries on restart... or some other better name
     loop {
-        counter += 1;
         match journal.next_entry() {
             Ok(None) => match journal.wait(None) {
                 Ok(_) => continue,
@@ -93,19 +161,16 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
                         println!("{}: {}", i, ent[i])
                     }
                 }
-                let mut msg = "".to_string();
-                if ent.contains_key("UNIT") && lookup.contains(&ent["UNIT"]) {
-                    // TODO: serialize as json or other configurable format
-                    for tag in config.tags.clone() {
-                        if ent.contains_key(&tag) {
-                            msg += &format!("{}:", ent[&tag])
+                match lookup.process(&ent) {
+                    None => (),
+                    Some(buf) => {
+                        producer.send(RecordKey::NULL, buf).await.unwrap();
+                        counter += 1;
+                        if counter.is_multiple_of(config.flush_batch_size) {
+                            producer.flush().await.unwrap();
                         }
                     }
-                    producer.send(RecordKey::NULL, msg).await.unwrap();
-                }
-                if counter.is_multiple_of(config.flush_batch_size) {
-                    producer.flush().await.unwrap();
-                }
+                };
             }
             Err(e) => {
                 // TODO: handle error more cleanly

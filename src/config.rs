@@ -11,6 +11,7 @@ pub(crate) struct CustomConfig {
     pub tags: Vec<String>,
     pub units: Vec<String>,
     pub flush_batch_size: u64,
-    pub default_unit_types: Option<Vec<String>>,
+    pub unit_types: Option<Vec<String>>,
+    pub serialization_format: Option<String>,
     pub debug: bool,
 }

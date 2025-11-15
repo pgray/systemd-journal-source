@@ -2936,6 +2936,7 @@ dependencies = [
  "fluvio",
  "fluvio-connector-common",
  "serde",
+ "serde_json",
  "systemd",
 ]
 

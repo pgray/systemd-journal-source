@@ -6,13 +6,21 @@ meta:
   topic: test-systemd-journal-source-topic
 # corresponds to https://docs.rs/systemd/latest/systemd/journal/struct.OpenOptions.html
 custom:
+  # e.g. journalctl --user
   current_user: false
+  # e.g. journalctl --system
   system: true
+  # only include entries from this host
   local_only: true
+  # only include entries from this boot
   runtime_only: false
+  # fields can be found via: journalctl -o verbose
   tags: ["UNIT", "_HOSTNAME", "MESSAGE", "PRIORITY"]
+  # journalctl --unit $unit_name
   units: ["tailscaled"]
+  # flush to fluvio every $flush_batch_size entries
   flush_batch_size: 10
+  # optional fields below... with their default values set here
   # unit_types: [".service", ".timer"]
   # serialization_format: "json" # or "colon"
-  debug: false
+  # debug: false

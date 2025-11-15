@@ -9,6 +9,9 @@ use systemd::{Journal, journal};
 use fluvio::{RecordKey, TopicProducerPool};
 use fluvio_connector_common::{Result, connector};
 
+// list of unit types to match if none specified on a given unit
+// TODO: more patterns by default?
+static UNIT_TYPES: &[&str] = &[".service", ".timer"];
 // Lookup allows us to filter units based on their names.
 // if Lookup is empty, all units are allowed.
 struct Lookup {
@@ -16,24 +19,33 @@ struct Lookup {
     empty: bool,
 }
 impl Lookup {
-    fn new(units: Vec<String>) -> Self {
+    fn new(units: Vec<String>, suffixes: Option<Vec<String>>) -> Self {
         let mut map = HashMap::new();
-        if units.len() == 0 {
+        if units.is_empty() {
             return Self {
                 units: map,
                 empty: true,
             };
         }
+        let suffixes = match suffixes {
+            Some(suffixes) => suffixes,
+            None => UNIT_TYPES.iter().map(|f| f.to_string()).collect(),
+        };
         for unit in units {
-            // TODO: more patterns?
-            if unit.ends_with(".service") || unit.ends_with(".timer") {
-                map.insert(unit, true);
+            let mut has_suffix = false;
+            for suffix in &suffixes {
+                if unit.ends_with(suffix) {
+                    has_suffix = true;
+                    break;
+                }
+            }
+            if has_suffix {
+                map.insert(unit.clone(), true);
             } else {
-                // subscribe to all matches non-suffixed units
-                // TODO: more types of units to add here?
-                map.insert(format!("{}.service", unit), true);
-                map.insert(format!("{}.timer", unit), true);
-            };
+                for suffix in UNIT_TYPES {
+                    map.insert(format!("{}{}", unit, suffix), true);
+                }
+            }
         }
         Self {
             units: map,
@@ -60,7 +72,7 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
         .unwrap();
 
     // setup lookup table for units
-    let lookup = Lookup::new(config.units);
+    let lookup = Lookup::new(config.units, config.default_unit_types);
 
     // do work
     let mut counter: u64 = 0;
@@ -82,18 +94,16 @@ async fn start(config: CustomConfig, producer: TopicProducerPool) -> Result<()> 
                     }
                 }
                 let mut msg = "".to_string();
-                if ent.contains_key("UNIT") {
-                    if lookup.contains(&ent["UNIT"]) {
-                        // TODO: serialize as json or other configurable format
-                        for tag in config.tags.clone() {
-                            if ent.contains_key(&tag) {
-                                msg += &format!("{}:", ent[&tag])
-                            }
+                if ent.contains_key("UNIT") && lookup.contains(&ent["UNIT"]) {
+                    // TODO: serialize as json or other configurable format
+                    for tag in config.tags.clone() {
+                        if ent.contains_key(&tag) {
+                            msg += &format!("{}:", ent[&tag])
                         }
-                        producer.send(RecordKey::NULL, msg).await.unwrap();
                     }
+                    producer.send(RecordKey::NULL, msg).await.unwrap();
                 }
-                if counter % config.flush_batch_size == 0 {
+                if counter.is_multiple_of(config.flush_batch_size) {
                     producer.flush().await.unwrap();
                 }
             }

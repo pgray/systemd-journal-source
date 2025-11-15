@@ -1,0 +1,20 @@
+[package]
+name = "systemd-journal-source"
+group = "idk"
+version = "0.1.0"
+apiVersion = "0.1.0"
+fluvio = "0.10.0"
+description = "a source for systemd journal logs"
+license = "Apache-2.0"
+visibility = "public"
+
+[direction]
+ source = true 
+
+[deployment]
+binary = "systemd-journal-source"
+
+[custom.properties.foo]
+title = "Foo"
+description = "Foo"
+type = "string"

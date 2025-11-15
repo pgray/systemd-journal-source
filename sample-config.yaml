@@ -1,0 +1,16 @@
+apiVersion: 0.1.0
+meta:
+  version: 0.1.0
+  name: my-systemd-journal-source-test-connector
+  type: systemd-journal-source-source
+  topic: test-systemd-journal-source-topic
+# corresponds to https://docs.rs/systemd/latest/systemd/journal/struct.OpenOptions.html
+custom:
+  current_user: false
+  system: true
+  local_only: true
+  runtime_only: false
+  tags: ["UNIT", "_HOSTNAME", "MESSAGE", "PRIORITY"]
+  units: ["tailscaled"]
+  flush_batch_size: 10
+  debug: false

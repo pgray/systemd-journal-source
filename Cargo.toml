@@ -1,0 +1,15 @@
+[package]
+name = "systemd-journal-source"
+version = "0.1.0"
+authors = ["pgray <pgray@file.photo>"]
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+
+serde = { version = "1.0", default-features = false, features = ["derive"]}
+
+fluvio = { git = "https://github.com/infinyon/fluvio", rev = "6450ad5076b35bf1a26f2cc0145fb18a4e7edbb6" }
+fluvio-connector-common = { git = "https://github.com/infinyon/fluvio", rev = "6450ad5076b35bf1a26f2cc0145fb18a4e7edbb6", features = ["derive"] }
+systemd = "0.10.1"
